@@ -1,0 +1,264 @@
+<!--
+SQL_Learning_Lab_DML_04
+Versión: 0.1.0
+Puedes cambiar la versión editando la variable VERSION al inicio del archivo.
+-->
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>SQL_Learning_Lab_DML_04</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <script>
+    // ========================
+    // CAMBIA AQUÍ LA VERSIÓN
+    // ========================
+    const VERSION = "0.1.0";
+  </script>
+  <style>
+    body { font-family: Arial, sans-serif; margin:0; padding:0; background:#eee; }
+    .container { display: flex; height: 100vh; }
+    .left, .right { padding: 24px; box-sizing: border-box; height: 100vh; }
+    .left { width: 40%; background: #fafafa; border-right: 1px solid #ccc; display: flex; flex-direction: column;}
+    .right { width: 60%; overflow:auto; background: #fff; }
+    h1 { text-align: center; margin-top: 24px; margin-bottom: 32px;}
+    .sql-input { resize: vertical; width: 100%; height: 220px; font-size: 14px; font-family: 'Fira Mono', monospace; padding: 8px; box-sizing: border-box; margin-bottom: 8px;}
+    .btn-row { display: flex; gap:12px; margin-bottom:12px; }
+    button { padding: 8px 18px; background: #ffa500; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;}
+    button:hover { background: #ffb733; }
+    #messages { min-height: 32px; background: #f6ecec; color: #a00; padding: 6px 8px; border-radius: 4px; margin-top:8px; font-size: 13px;}
+    .tables-area { display: flex; flex-wrap: wrap; gap: 18px; }
+    .table-box { border-radius:8px; padding:16px; min-width:220px; background: #cce5ff; box-shadow: 0 2px 6px #bbb2; margin-bottom:16px;}
+    .table-title { font-weight: bold; margin-bottom: 8px; }
+    .column-info { font-size:12px; margin-bottom: 4px;}
+    .row-data { border-top:1px solid #bbb; font-size:13px; margin-top:8px; padding-top:5px;}
+    .colname { font-weight: bold;}
+    .pk { color:#d00;}
+    .notnull { color:#00a;}
+    .default { color:#090;}
+    .check { color:#a50;}
+    @media (max-width: 800px) {
+      .container { flex-direction: column;}
+      .left, .right { width: 100%; height: auto;}
+    }
+  </style>
+</head>
+<body>
+  <h1>SQL_Learning_Lab_DML_04: Versión <span id="version"></span></h1>
+  <div class="container">
+    <div class="left">
+      <textarea class="sql-input" id="sqlInput" placeholder="Escribe aquí tu código SQL..."></textarea>
+      <div class="btn-row">
+        <button id="executeBtn">Ejecutar</button>
+        <button id="clearBtn">Borrar</button>
+        <button id="initBtn">Inicializar BBDD</button>
+        <button id="dropBtn">Eliminar BBDD</button>
+        <button id="refreshBtn">Actualizar</button>
+      </div>
+      <div id="messages"></div>
+    </div>
+    <div class="right">
+      <div id="tablesArea" class="tables-area"></div>
+    </div>
+  </div>
+  <!-- SQL.js desde CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.6.2/sql-wasm.js"></script>
+  <script>
+    document.getElementById('version').textContent = VERSION;
+
+    // Variables globales
+    let db;
+    let SQL;
+    const initSQL = `
+-- Inicializa la BBDD de ejemplo
+DROP TABLE IF EXISTS alumnos;
+DROP TABLE IF EXISTS cursos;
+
+CREATE TABLE alumnos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nombre TEXT NOT NULL,
+  edad INTEGER CHECK(edad >= 0),
+  curso_id INTEGER,
+  FOREIGN KEY (curso_id) REFERENCES cursos(id)
+);
+
+CREATE TABLE cursos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nombre TEXT NOT NULL,
+  nivel TEXT DEFAULT 'Básico' CHECK(nivel IN ('Básico','Intermedio','Avanzado'))
+);
+
+INSERT INTO cursos (nombre,nivel) VALUES ('Matemáticas','Básico'), ('Física','Avanzado');
+INSERT INTO alumnos (nombre,edad,curso_id) VALUES ('Ana',20,1),('Luis',21,2),('Marta',22,1);
+`;
+
+    function showMsg(msg, isError=false) {
+      const el = document.getElementById('messages');
+      el.innerHTML = msg;
+      el.style.color = isError ? "#a00" : "#070";
+    }
+
+    // Inicializar SQL.js
+    initSqlJs({locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.6.2/${file}`})
+      .then(SQLLib => {
+        SQL = SQLLib;
+        db = new SQL.Database();
+        showMsg('Base de datos creada. Usa "Inicializar BBDD" para comenzar.');
+        renderTables();
+      });
+
+    // Función para ejecutar SQL
+    function executeSQL() {
+      const sql = document.getElementById('sqlInput').value;
+      try {
+        const result = db.exec(sql);
+        showMsg('SQL ejecutado correctamente.');
+        renderTables();
+      } catch (e) {
+        showMsg(e.message, true);
+      }
+    }
+
+    // Función para inicializar la BBDD
+    function initDB() {
+      document.getElementById('sqlInput').value = initSQL;
+      showMsg('Código de inicialización cargado. Pulsa "Ejecutar" para crear la BBDD.');
+    }
+
+    // Función para eliminar la BBDD (vacía y elimina tablas)
+    function dropDB() {
+      try {
+        // Borrar todas las tablas
+        const tables = db.exec("SELECT name FROM sqlite_master WHERE type='table';")[0]?.values.map(v=>v[0]) ?? [];
+        tables.forEach(table => {
+          db.exec(`DROP TABLE IF EXISTS "${table}"`);
+        });
+        showMsg('Base de datos eliminada.');
+        renderTables();
+      } catch(e) {
+        showMsg(e.message, true);
+      }
+    }
+
+    // Función para limpiar el textarea
+    function clearInput() {
+      document.getElementById('sqlInput').value = "";
+      showMsg('');
+    }
+
+    // Refresca la parte gráfica
+    function refreshTables() {
+      renderTables();
+      showMsg('Vista gráfica actualizada.');
+    }
+
+    // Renderizar tablas gráficamente
+    function renderTables() {
+      const area = document.getElementById('tablesArea');
+      area.innerHTML = "";
+      if (!db) return;
+      // Leer todas las tablas
+      let tables = [];
+      try {
+        const res = db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';");
+        tables = res[0]?.values.map(v=>v[0]) ?? [];
+      } catch {}
+      if (tables.length === 0) {
+        area.innerHTML = "<em>No hay tablas en la base de datos.</em>";
+        return;
+      }
+      tables.forEach((table, i) => {
+        // Colores alternos para cada tabla
+        const colors = ["#cce5ff","#fff3cd","#d4edda","#f8d7da","#e2e3e5"];
+        const color = colors[i%colors.length];
+
+        // Obtener columnas y tipos
+        let cols = [];
+        try {
+          const info = db.exec(`PRAGMA table_info('${table}')`);
+          cols = info[0]?.values.map(row => ({
+            name: row[1],
+            type: row[2],
+            notnull: row[3],
+            default: row[4],
+            pk: row[5]
+          })) ?? [];
+        } catch {}
+
+        // Obtener restricciones (PK, NOT NULL, DEFAULT, CHECK)
+        let constraints = {};
+        cols.forEach(col => {
+          constraints[col.name] = [];
+          if (col.pk) constraints[col.name].push("<span class='pk'>PRIMARY KEY</span>");
+          if (col.notnull) constraints[col.name].push("<span class='notnull'>NOT NULL</span>");
+          if (col.default) constraints[col.name].push(`<span class='default'>DEFAULT ${col.default}</span>`);
+        });
+
+        // CHECK constraints (simple parse)
+        let checks = [];
+        try {
+          const sqltbl = db.exec(`SELECT sql FROM sqlite_master WHERE type='table' AND name='${table}'`);
+          const tableSQL = sqltbl[0]?.values[0][0] ?? "";
+          const checkRegex = /CHECK\s*\(([^)]+)\)/gi;
+          let match;
+          while ((match = checkRegex.exec(tableSQL)) !== null) {
+            checks.push(match[1]);
+          }
+        } catch {}
+
+        // Obtener filas
+        let rows = [];
+        try {
+          const res = db.exec(`SELECT * FROM "${table}"`);
+          // res[0].columns, res[0].values
+          rows = res[0]?.values ?? [];
+        } catch {}
+
+        // Construir HTML
+        let html = `<div class="table-box" style="background:${color};"><div class="table-title">${table}</div>`;
+        html += `<div><strong>Estructura:</strong></div>`;
+        cols.forEach(col => {
+          html += `<div class="column-info"><span class="colname">${col.name}</span> <em>(${col.type})</em> ${constraints[col.name].join(' ')} </div>`;
+        });
+        if (checks.length>0) {
+          html += `<div class="check">Restricciones CHECK: ${checks.map(c=>`<span class='check'>${c}</span>`).join(', ')}</div>`;
+        }
+        html += `<div class="row-data"><strong>Datos:</strong></div>`;
+        if (rows.length > 0) {
+          rows.forEach(row => {
+            html += `<div>(${row.map((v,j)=> `<span><span class="colname">${cols[j]?.name}</span>: ${v}</span>`).join(', ')})</div>`;
+          });
+        } else {
+          html += `<div><em>No hay registros.</em></div>`;
+        }
+        html += `</div>`;
+        area.innerHTML += html;
+      });
+    }
+
+    // Captura TAB en el textarea para sangría
+    document.getElementById('sqlInput').addEventListener('keydown', function(e){
+      if(e.key === 'Tab'){
+        e.preventDefault();
+        let start = this.selectionStart;
+        let end = this.selectionEnd;
+        this.value = this.value.substring(0, start) + "    " + this.value.substring(end);
+        this.selectionStart = this.selectionEnd = start + 4;
+      }
+      // Ctrl+Enter ejecuta SQL
+      if(e.ctrlKey && e.key === 'Enter'){
+        e.preventDefault();
+        executeSQL();
+      }
+    });
+
+    // Botones
+    document.getElementById('executeBtn').onclick = executeSQL;
+    document.getElementById('clearBtn').onclick = clearInput;
+    document.getElementById('initBtn').onclick = initDB;
+    document.getElementById('dropBtn').onclick = dropDB;
+    document.getElementById('refreshBtn').onclick = refreshTables;
+
+  </script>
+</body>
+</html>
